@@ -7,13 +7,21 @@
 using namespace timer;
 
 const int RADIUS = 7;
+const int BLOCK_SIZE = 256;
 
 __global__
 void stencilKernel(const int* d_input, int N,int* d_output) {
-    // YOUR CODE
+    // MY CODE
+	int global_id = blockIdx.x * blockDim.x + threadIdx.x;
+	if (global_id >= RADIUS && global_id < (N-RADIUS)) {
+		int buff = 0;
+		for (int j = global_id - RADIUS; j <= global_id + RADIUS; j++)
+             buff += d_input[j];
+		d_output[global_id] = buff;
+	}
 }
 
-const int N  = 10000000;
+const int N  = 100000000;
 
 int main() {
     Timer<DEVICE> TM_device;
@@ -48,22 +56,25 @@ int main() {
     // -------------------------------------------------------------------------
     // DEVICE MEMORY ALLOCATION
     int *d_input, *d_output;
-    /// SAFE_CALL( cudaMalloc( ... ) )
-    /// SAFE_CALL( cudaMalloc( ... ) )
+    SAFE_CALL( cudaMalloc( &d_input, N * sizeof(int) ));
+    SAFE_CALL( cudaMalloc( &d_output, N * sizeof(int) ));
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM HOST TO DEVIE
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+	SAFE_CALL( cudaMemcpy( d_input, h_input, N * sizeof(int), cudaMemcpyHostToDevice));
 
     // -------------------------------------------------------------------------
     // did you miss something?
-    ///
+    // yes, DEVICE INIT
+    dim3 DimGrid(N/BLOCK_SIZE, 1, 1);
+    if (N%BLOCK_SIZE) DimGrid.x++;
+    dim3 DimBlock(BLOCK_SIZE, 1, 1);
 
     // -------------------------------------------------------------------------
     // DEVICE EXECUTION
     TM_device.start();
 
-    /// stencilKernel<<<  >>>();
+    stencilKernel<<<DimGrid,DimBlock>>>(d_input,N,d_output);
 
     TM_device.stop();
     CHECK_CUDA_ERROR
@@ -75,7 +86,7 @@ int main() {
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM DEVICE TO HOST
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+    SAFE_CALL( cudaMemcpy(h_output_tmp, d_output, N * sizeof(int), cudaMemcpyDeviceToHost));
 
     // -------------------------------------------------------------------------
     // RESULT CHECK
@@ -98,8 +109,8 @@ int main() {
 
     // -------------------------------------------------------------------------
     // DEVICE MEMORY DEALLOCATION
-    /// SAFE_CALL( cudaFree( ... ) )
-    /// SAFE_CALL( cudaFree( ... ) )
+    SAFE_CALL( cudaFree( d_input ) );
+    SAFE_CALL( cudaFree( d_output ) );
 
     // -------------------------------------------------------------------------
     cudaDeviceReset();

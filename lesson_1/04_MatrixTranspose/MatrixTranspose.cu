@@ -11,6 +11,10 @@ void matrixTransposeKernel(const int* d_matrix_in,
                            int        N,
                            int*       d_matrix_out) {
     /// YOUR CODE
+	int col = blockIdx.x * blockDim.x + threadIdx.x;
+	int row = blockIdx.y * blockDim.y + threadIdx.y;
+
+	d_matrix_out
 }
 
 const int N  = 1000;

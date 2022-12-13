@@ -6,14 +6,34 @@
 #include "CheckError.cuh"
 using namespace timer;
 
-const int RADIUS = 7;
+const int RADIUS = 5;
+const int BLOCK_SIZE = 256;
 
 __global__
 void stencilKernel(const int* d_input, int N,int* d_output) {
     // YOUR CODE
+
+	int global_id = blockIdx.x * blockDim.x + threadIdx.x;
+	__shared__ int global_in[BLOCK_SIZE + RADIUS * 2];
+
+	if (global_id >= RADIUS && global_id < (N-RADIUS)) {
+		global_in[threadIdx.x] = d_input[global_id-RADIUS];
+		__syncthreads();
+
+		int sum = 0;
+		for (int j = global_id - RADIUS; j < global_id + RADIUS*2; j++) {
+             sum += global_in[j];
+		}
+	printf("%d %d", sum, global_in[global_id + RADIUS*2]);
+sum += global_in[global_id + RADIUS*2];
+	printf("%d\n", sum);
+		__syncthreads();
+
+		d_output[global_id] = sum;
+	}
 }
 
-const int N  = 10000000;
+const int N  = 100;
 
 int main() {
     Timer<DEVICE> TM_device;
@@ -31,7 +51,7 @@ int main() {
     std::uniform_int_distribution<int> distribution(1, 100);
 
     for (int i = 0; i < N; i++)
-        h_input[i] = distribution(generator);
+        h_input[i] = 1;
 
     // -------------------------------------------------------------------------
     // HOST EXECUTIION
@@ -48,23 +68,25 @@ int main() {
     // -------------------------------------------------------------------------
     // DEVICE MEMORY ALLOCATION
     int *d_input, *d_output;
-    /// SAFE_CALL( cudaMalloc( ... ) )
-    /// SAFE_CALL( cudaMalloc( ... ) )
+    SAFE_CALL( cudaMalloc( &d_input, N * sizeof(int) ));
+    SAFE_CALL( cudaMalloc( &d_output, N * sizeof(int) ));
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM HOST TO DEVIE
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+	SAFE_CALL( cudaMemcpy( d_input, h_input, N * sizeof(int), cudaMemcpyHostToDevice));
 
     // -------------------------------------------------------------------------
     // did you miss something?
-    ///
+    // yes, DEVICE INIT
+    dim3 DimGrid(N/BLOCK_SIZE, 1, 1);
+    if (N%BLOCK_SIZE) DimGrid.x++;
+    dim3 DimBlock(BLOCK_SIZE, 1, 1);
 
     // -------------------------------------------------------------------------
     // DEVICE EXECUTION
     TM_device.start();
 
-    /// stencilKernel<<<  >>>();
-
+    stencilKernel<<<DimGrid,DimBlock>>>(d_input,N,d_output);
     TM_device.stop();
     CHECK_CUDA_ERROR
     TM_device.print("1DStencil device: ");
@@ -75,7 +97,7 @@ int main() {
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM DEVICE TO HOST
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+    SAFE_CALL( cudaMemcpy(h_output_tmp, d_output, N * sizeof(int), cudaMemcpyDeviceToHost));
 
     // -------------------------------------------------------------------------
     // RESULT CHECK
@@ -98,8 +120,8 @@ int main() {
 
     // -------------------------------------------------------------------------
     // DEVICE MEMORY DEALLOCATION
-    /// SAFE_CALL( cudaFree( ... ) )
-    /// SAFE_CALL( cudaFree( ... ) )
+    SAFE_CALL( cudaFree( d_input ) );
+    SAFE_CALL( cudaFree( d_output ) );
 
     // -------------------------------------------------------------------------
     cudaDeviceReset();
