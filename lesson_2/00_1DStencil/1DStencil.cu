@@ -13,20 +13,17 @@ __global__
 void stencilKernel(const int* d_input, int N,int* d_output) {
     // YOUR CODE
 
+	__shared__ int ds[BLOCK_SIZE + RADIUS * 2];
 	int global_id = blockIdx.x * blockDim.x + threadIdx.x;
-	__shared__ int global_in[BLOCK_SIZE + RADIUS * 2];
 
 	if (global_id >= RADIUS && global_id < (N-RADIUS)) {
-		global_in[threadIdx.x] = d_input[global_id-RADIUS];
+		ds[threadIdx.x] = d_input[global_id-RADIUS];
 		__syncthreads();
 
 		int sum = 0;
 		for (int j = global_id - RADIUS; j < global_id + RADIUS*2; j++) {
-             sum += global_in[j];
+             sum += ds[j];
 		}
-	printf("%d %d", sum, global_in[global_id + RADIUS*2]);
-sum += global_in[global_id + RADIUS*2];
-	printf("%d\n", sum);
 		__syncthreads();
 
 		d_output[global_id] = sum;

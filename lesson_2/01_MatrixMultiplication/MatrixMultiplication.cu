@@ -1,23 +1,40 @@
 #include <chrono>
 #include <iomanip>
+#include <math.h>
 #include <iostream>
 #include <random>
 #include "Timer.cuh"
 #include "CheckError.cuh"
 using namespace timer;
 
-const int BLOCK_SIZE_X = 16;
-const int BLOCK_SIZE_Y = 16;
+const int N = 1024;
+const int TILE_WIDTH = 16;
 
 __global__
 void matrixMultiplicationKernel(const int* d_matrixA,
                                 const int* d_matrixB,
                                 int        N,
                                 int*       d_matrixC) {
-    /// YOUR CODE
-}
+    __shared__ int ds_A[TILE_WIDTH][TILE_WIDTH];
+    __shared__ int ds_B[TILE_WIDTH][TILE_WIDTH];
+    int bx = blockIdx.x; int by = blockIdx.y;
+    int tx = threadIdx.x; int ty = threadIdx.y;         
+    int col = bx * TILE_WIDTH + tx;
+	int row = by * TILE_WIDTH + ty;
 
-const int N = 300;
+	if (col < N/TILE_WIDTH && row < N/TILE_WIDTH) {
+		int sum = 0;
+		for (int m = 0; m < N/TILE_WIDTH; ++m) {
+			ds_A[ty][tx] = d_matrixA[row*N + m*TILE_WIDTH+tx];
+			ds_B[ty][tx] = d_matrixB[col+(m*TILE_WIDTH+ty)*N];
+			__syncthreads();
+			for (int k = 0; k < TILE_WIDTH; ++k)
+				sum += ds_A[ty][k] * ds_B[k][tx];
+			__syncthreads();
+		}
+		d_matrixC[row*N+col] = sum;
+	}
+}
 
 int main() {
     Timer<DEVICE> TM_device;
@@ -58,23 +75,24 @@ int main() {
     // -------------------------------------------------------------------------
     // DEVICE MEMORY ALLOCATION
     int *d_matrixA, *d_matrixB, *d_matrixC;
-    /// SAFE_CALL( cudaMalloc( ... ) )
-    /// SAFE_CALL( cudaMalloc( ... ) )
-    /// SAFE_CALL( cudaMalloc( ... ) )
+    SAFE_CALL( cudaMalloc( &d_matrixA, N * N * sizeof(int) ));
+	SAFE_CALL( cudaMalloc( &d_matrixB, N * N * sizeof(int) ));
+    SAFE_CALL( cudaMalloc( &d_matrixC, N * N * sizeof(int) ));
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM HOST TO DEVIE
-    /// SAFE_CALL( cudaMemcpy( ... ) )
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+    SAFE_CALL( cudaMemcpy( d_matrixA, h_matrixA, N * N * sizeof(int), cudaMemcpyHostToDevice));
+	SAFE_CALL( cudaMemcpy( d_matrixB, h_matrixB, N * N * sizeof(int), cudaMemcpyHostToDevice));
 
     // -------------------------------------------------------------------------
     // DEVICE EXECUTION
     TM_device.start();
 
-    dim3 block_size( ... );
-    dim3 num_blocks( ... );
-    /// matrixMultiplicationKernel<<< num_blocks, block_size >>>
-    ///    (d_matrixA, d_matrixB, N, d_matrixC);
+    dim3 DimGrid(N/TILE_WIDTH,N/TILE_WIDTH, 1);
+	if (N%TILE_WIDTH) {DimGrid.x++; DimGrid.y++;}
+    dim3 DimBlock(TILE_WIDTH, TILE_WIDTH, 1);
+    matrixMultiplicationKernel<<<DimGrid, DimBlock>>>
+    (d_matrixA, d_matrixB, N, d_matrixC);
 
     TM_device.stop();
     CHECK_CUDA_ERROR
@@ -86,7 +104,7 @@ int main() {
 
     // -------------------------------------------------------------------------
     // COPY DATA FROM DEVICE TO HOST
-    /// SAFE_CALL( cudaMemcpy( ... ) )
+    SAFE_CALL( cudaMemcpy(h_matrix_tmp, d_matrixC, N * N * sizeof(int), cudaMemcpyDeviceToHost));
 
     // -------------------------------------------------------------------------
     // RESULT CHECK
@@ -111,9 +129,9 @@ int main() {
 
     // -------------------------------------------------------------------------
     // DEVICE MEMORY DEALLOCATION
-    /// SAFE_CALL( cudaFree( ... ) )
-    /// SAFE_CALL( cudaFree( ... ) )
-    /// SAFE_CALL( cudaFree( ... ) )
+    SAFE_CALL( cudaFree( d_matrixA ) );
+    SAFE_CALL( cudaFree( d_matrixB ) );
+    SAFE_CALL( cudaFree( d_matrixC ) );
 
     // -------------------------------------------------------------------------
     cudaDeviceReset();
