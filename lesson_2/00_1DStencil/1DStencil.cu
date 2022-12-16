@@ -30,7 +30,7 @@ void stencilKernel(const int* d_input, int N,int* d_output) {
 	}
 }
 
-const int N  = 100;
+const int N  = 10000;
 
 int main() {
     Timer<DEVICE> TM_device;
