@@ -20,20 +20,18 @@ void matrixMultiplicationKernel(const int* d_matrixA,
     int bx = blockIdx.x; int by = blockIdx.y;
     int tx = threadIdx.x; int ty = threadIdx.y;         
     int col = bx * TILE_WIDTH + tx;
-	int row = by * TILE_WIDTH + ty;
-
-	if (col < N/TILE_WIDTH && row < N/TILE_WIDTH) {
-		int sum = 0;
-		for (int m = 0; m < N/TILE_WIDTH; ++m) {
-			ds_A[ty][tx] = d_matrixA[row*N + m*TILE_WIDTH+tx];
-			ds_B[ty][tx] = d_matrixB[col+(m*TILE_WIDTH+ty)*N];
-			__syncthreads();
-			for (int k = 0; k < TILE_WIDTH; ++k)
-				sum += ds_A[ty][k] * ds_B[k][tx];
-			__syncthreads();
-		}
-		d_matrixC[row*N+col] = sum;
+    int row = by * TILE_WIDTH + ty;
+	
+	int sum = 0;
+	for (int m = 0; m < N/TILE_WIDTH; ++m) {
+		ds_A[ty][tx] = d_matrixA[row*N + m*TILE_WIDTH+tx];
+		ds_B[ty][tx] = d_matrixB[col+(m*TILE_WIDTH+ty)*N];
+		__syncthreads();
+		for (int k = 0; k < TILE_WIDTH; ++k)
+			sum += ds_A[ty][k] * ds_B[k][tx];
+		__syncthreads();
 	}
+	d_matrixC[row*N+col] = sum;
 }
 
 int main() {
