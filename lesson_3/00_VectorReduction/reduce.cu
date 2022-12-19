@@ -13,7 +13,44 @@ const int N  = 16777216;
 #define BLOCK_SIZE 256
 
 __global__ void ReduceKernel(int* VectorIN, int N) {
+	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	
+	for (int i = 1; i < blockDim.x; i *= 2) {
+		if (GlobalIndex % (i * 2) == 0) {
+			int sum = VectorIN[GlobalIndex] + VectorIN[GlobalIndex + i];
+			VectorIN[GlobalIndex] = sum;
+		}
+	}
+}
 
+__global__ void ReduceKernel_shared_div(int* VectorIN, int N) {
+	__shared__ int SMem[1024];
+	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	SMem[threadIdx.x] = VectorIN[GlobalIndex];
+	__syncthreads();
+	for (int i = 1; i < blockDim.x; i *= 2) {
+		if (threadIdx.x % (i * 2) == 0)
+			SMem[threadIdx.x] += SMem[threadIdx.x + i];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0)
+		VectorIN[blockIdx.x] = SMem[0];
+}
+
+
+__global__ void ReduceKernel_shared(int* VectorIN, int N) {
+	__shared__ int SMem[1024];
+	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
+	SMem[threadIdx.x] = VectorIN[GlobalIndex];
+	__syncthreads();
+	for (int i = 1; i < blockDim.x; i *= 2) {
+		int index = threadIdx.x * i * 2;
+		if (index < blockDim.x)
+			SMem[index] += SMem[index + i];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0)
+		VectorIN[blockIdx.x] = SMem[0];
 }
 
 int main() {
@@ -41,11 +78,11 @@ int main() {
 	
 	SAFE_CALL( cudaMemcpy(devVectorIN, VectorIN, N * sizeof(int),
                  cudaMemcpyHostToDevice) );
-	
-	int sum;
-	float dev_time;
+
+	float dev_time; 
 
 	// ------------------- CUDA COMPUTATION 1 ----------------------------------
+	int sum;
 
     std::cout<<"Starting computation on DEVICE "<<std::endl;
 
@@ -61,18 +98,21 @@ int main() {
 	dev_time = dev_TM.duration();
 	CHECK_CUDA_ERROR;
 
+	std::cout << std::setprecision(3)
+              << "DeviceTime            : " << dev_TM.duration() << std::endl;
+
 	SAFE_CALL( cudaMemcpy(&sum, devVectorIN, sizeof(int),
                             cudaMemcpyDeviceToHost) );
 
 	// ------------------- HOST ------------------------------------------------
-    host_TM.start();
+	   
+	host_TM.start();
 
 	int host_sum = std::accumulate(VectorIN, VectorIN + N, 0);
 
     host_TM.stop();
 
     std::cout << std::setprecision(3)
-              << "KernelTime Divergent: " << dev_time << std::endl
               << "HostTime            : " << host_TM.duration() << std::endl
               << std::endl;
 
