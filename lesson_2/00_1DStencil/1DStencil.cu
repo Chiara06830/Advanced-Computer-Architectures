@@ -6,31 +6,37 @@
 #include "CheckError.cuh"
 using namespace timer;
 
-const int RADIUS = 5;
-const int BLOCK_SIZE = 256;
+const int RADIUS = 7;
+const int BLOCK_SIZE = 32;
 
 __global__
 void stencilKernel(const int* d_input, int N,int* d_output) {
-    // YOUR CODE
 
-	__shared__ int ds[BLOCK_SIZE + RADIUS * 2];
-	int global_id = blockIdx.x * blockDim.x + threadIdx.x;
-
-	if (global_id >= RADIUS && global_id < (N-RADIUS)) {
-		ds[threadIdx.x] = d_input[global_id-RADIUS];
-		__syncthreads();
-
-		int sum = 0;
-		for (int j = global_id - RADIUS; j < global_id + RADIUS*2; j++) {
-             sum += ds[j];
-		}
-		__syncthreads();
-
-		d_output[global_id] = sum;
-	}
+	__shared__ int SMem[1024];
+    int Index = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    SMem[threadIdx.x + RADIUS] = Index < N ? d_input[Index + RADIUS] : 0;
+    
+    __syncthreads();
+    
+    if (threadIdx.x < RADIUS)
+        SMem[threadIdx.x] = d_input[Index];
+    if (threadIdx.x >= blockDim.x - RADIUS)
+        SMem[threadIdx.x + RADIUS*2] = d_input[Index + RADIUS*2];
+    
+    __syncthreads();
+    
+    int sum = 0;
+    for (int j = threadIdx.x; j <= threadIdx.x + RADIUS*2; ++j)
+        sum += SMem[j];
+    
+    d_output[Index + RADIUS] = sum;
+    
+    if (Index >= N-RADIUS && Index < N)
+        d_output[Index] = 0;
 }
 
-const int N  = 10000;
+const int N  = 10000000;
 
 int main() {
     Timer<DEVICE> TM_device;

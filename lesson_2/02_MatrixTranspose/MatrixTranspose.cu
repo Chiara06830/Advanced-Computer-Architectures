@@ -23,7 +23,6 @@ void matrixTransposeKernel(const int* d_matrix_in,
     __syncthreads();
     
     d_matrix_out[row * N + col] = ds[tx][ty];
-    
 }
 
 int main() {

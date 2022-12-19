@@ -34,6 +34,42 @@ void matrixMultiplicationKernel(const int* d_matrixA,
 	d_matrixC[row*N+col] = sum;
 }
 
+//a slightly more optimized version of MatrixMult with sh_mem
+__global__
+void matrixMultiplicationKernel_ShM2(const int* d_matrixA,
+                                const int* d_matrixB,
+                                int        N,
+                                int*       d_matrixC) {
+    
+    __shared__ int A_Tile[TILE][TILE];
+    __shared__ int B_Tile[TILE][TILE];
+    
+    int sum = 0;
+    for (int phase = 0; phase < N / TILE; ++phase) {
+        
+        int A_moveOnX = phase * TILE + threadIdx.x;
+        int A_moveOnY = (blockIdx.y * TILE * N) /* Block Y pos */ + threadIdx.y * N;
+        
+        A_Tile[threadIdx.y][threadIdx.x] = d_matrixA[A_moveOnY + A_moveOnX];
+        
+        int B_moveOnX = blockIdx.x * TILE + threadIdx.x;
+        int B_moveOnY = phase * TILE * N + threadIdx.y * N;
+        
+        B_Tile[threadIdx.y][threadIdx.x] = d_matrixB[B_moveOnY + B_moveOnX];
+        
+        __syncthreads();
+        
+        for (int k = 0; k < TILE; ++k)
+            sum += A_Tile[threadIdx.y][k] * B_Tile[k][threadIdx.x];
+        
+        __syncthreads();
+    }
+    int C_moveOnX = blockIdx.x * blockDim.x + threadIdx.x;
+    int C_moveOnY = (blockIdx.y * blockDim.y + threadIdx.y) * N;
+    
+    d_matrixC[ C_moveOnY + C_moveOnX ] = sum;
+}
+
 int main() {
     Timer<DEVICE> TM_device;
     Timer<HOST>   TM_host;
