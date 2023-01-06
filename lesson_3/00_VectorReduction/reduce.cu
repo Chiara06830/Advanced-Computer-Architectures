@@ -12,17 +12,7 @@ using namespace timer;
 const int N  = 16777216;
 #define BLOCK_SIZE 256
 
-__global__ void ReduceKernel(int* VectorIN, int N) {
-	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
-	
-	for (int i = 1; i < blockDim.x; i *= 2) {
-		if (GlobalIndex % (i * 2) == 0) {
-			int sum = VectorIN[GlobalIndex] + VectorIN[GlobalIndex + i];
-			VectorIN[GlobalIndex] = sum;
-		}
-	}
-}
-
+// v1: with shared mem and divergent
 __global__ void ReduceKernel_shared_div(int* VectorIN, int N) {
 	__shared__ int SMem[1024];
 	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -37,7 +27,7 @@ __global__ void ReduceKernel_shared_div(int* VectorIN, int N) {
 		VectorIN[blockIdx.x] = SMem[0];
 }
 
-
+// v2: with shared mem and less divergent
 __global__ void ReduceKernel_shared(int* VectorIN, int N) {
 	__shared__ int SMem[1024];
 	int GlobalIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -55,15 +45,15 @@ __global__ void ReduceKernel_shared(int* VectorIN, int N) {
 
 int main() {
     
-    // ------------------- INIT ------------------------------------------------
+	// ------------------- INIT ------------------------------------------------
 
-    // Random Engine Initialization
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::default_random_engine generator (seed);
-    std::uniform_int_distribution<int> distribution(1, 100);
+	// Random Engine Initialization
+	unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+	std::default_random_engine generator (seed);
+	std::uniform_int_distribution<int> distribution(1, 100);
 
-    Timer<HOST> host_TM;
-    Timer<DEVICE> dev_TM;
+	Timer<HOST> host_TM;
+	Timer<DEVICE> dev_TM;
 
 	// ------------------ HOST INIT --------------------------------------------
 
@@ -72,27 +62,57 @@ int main() {
 		VectorIN[i] = distribution(generator);
 
 	// ------------------- CUDA INIT -------------------------------------------
+	// v3: global with task parallelism for data transfer/kernel computation overlapping
+	//cudaStream_t stream0, stream1;
+	//cudaStreamCreate( &stream0);
+	//cudaStreamCreate( &stream1);
+	//int *devVectorIN0; // device memory for stream 0
+	//int *devVectorIN1; // device memory for stream 1
 
 	int* devVectorIN;
-	SAFE_CALL( cudaMalloc(&devVectorIN, N * sizeof(int)) );
-	
-	SAFE_CALL( cudaMemcpy(devVectorIN, VectorIN, N * sizeof(int),
-                 cudaMemcpyHostToDevice) );
-
+	SAFE_CALL( cudaMalloc(&devVectorIN0, N * sizeof(int)) );
+	SAFE_CALL( cudaMemcpy(devVectorIN0, VectorIN, N * sizeof(int),
+	            cudaMemcpyHostToDevice) );
+	SAFE_CALL( cudaMalloc(&devVectorIN1, N * sizeof(int)) );
+	SAFE_CALL( cudaMemcpy(devVectorIN1, VectorIN, N * sizeof(int),
+	            cudaMemcpyHostToDevice) );
 	float dev_time; 
-
-	// ------------------- CUDA COMPUTATION 1 ----------------------------------
+	
+	// ------------------- CUDA COMPUTATION ----------------------------------
 	int sum;
 
-    std::cout<<"Starting computation on DEVICE "<<std::endl;
+	std::cout<<"Starting computation on DEVICE "<<std::endl;
 
-    dev_TM.start();
-	ReduceKernel<<<DIV(N, BLOCK_SIZE), BLOCK_SIZE>>>
-                        (devVectorIN, N);
-	ReduceKernel<<<DIV(N, BLOCK_SIZE* BLOCK_SIZE), BLOCK_SIZE>>>
-                         (devVectorIN, DIV(N, BLOCK_SIZE));
-	ReduceKernel<<<DIV(N, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE>>>
-                         (devVectorIN, DIV(N, BLOCK_SIZE * BLOCK_SIZE));
+	dev_TM.start();
+	
+	ReduceKernel_shared<<<DIV(N, BLOCK_SIZE), BLOCK_SIZE>>>
+        	       (devVectorIN, N);
+	ReduceKernel_shared<<<DIV(N, BLOCK_SIZE* BLOCK_SIZE), BLOCK_SIZE>>>
+                (devVectorIN, DIV(N, BLOCK_SIZE));
+	ReduceKernel_shared<<<DIV(N, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE>>>
+             (devVectorIN, DIV(N, BLOCK_SIZE * BLOCK_SIZE));
+        
+        //for (int i=0; i<N; i+=BLOCK_SIZE*2) {
+		//cudaMemcpyAsync(devVectorIN0, VectorIN+i, N*sizeof(float), cudaMemcpyKind.cudaMemcpyDeviceToHost, stream0);
+		//cudaMemcpyAsync(devVectorIN0, VectorIN+i+BLOCK_SIZE, N*sizeof(float), stream1);
+		
+		//ReduceKernel_shared<<<DIV(N, BLOCK_SIZE), BLOCK_SIZE, stream0>>>
+               //       (devVectorIN0, N);
+		//ReduceKernel_shared<<<DIV(N, BLOCK_SIZE* BLOCK_SIZE), BLOCK_SIZE, stream0>>>
+               //        (devVectorIN0, DIV(N, BLOCK_SIZE));
+		//ReduceKernel_shared<<<DIV(N, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE, stream0>>>
+                //       (devVectorIN0, DIV(N, BLOCK_SIZE * BLOCK_SIZE));
+                       
+                //ReduceKernel_shared<<<DIV(N, BLOCK_SIZE), BLOCK_SIZE, stream1>>>
+                //       (devVectorIN1, N);
+		//ReduceKernel_shared<<<DIV(N, BLOCK_SIZE* BLOCK_SIZE), BLOCK_SIZE, stream1>>>
+                //       (devVectorIN1, DIV(N, BLOCK_SIZE));
+		//ReduceKernel_shared<<<DIV(N, BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE), BLOCK_SIZE, stream1>>>
+                //       (devVectorIN1, DIV(N, BLOCK_SIZE * BLOCK_SIZE));
+                       
+		//cudaMemcpyAsync(devVectorIN0, VectorIN+i, N*sizeof(float),stream0);
+		//cudaMemcpyAsync(devVectorIN0, VectorIN+i+BLOCK_SIZE, N*sizeof(float), stream1);
+	//}
 
 	dev_TM.stop();
 	dev_time = dev_TM.duration();
@@ -108,11 +128,12 @@ int main() {
 	   
 	host_TM.start();
 
+	// v0: sequential
 	int host_sum = std::accumulate(VectorIN, VectorIN + N, 0);
 
-    host_TM.stop();
+	host_TM.stop();
 
-    std::cout << std::setprecision(3)
+	std::cout << std::setprecision(3)
               << "HostTime            : " << host_TM.duration() << std::endl
               << std::endl;
 
